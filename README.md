@@ -1,5 +1,6 @@
-# sistema-rh-ms
-Sistema de RH - Micro serviços
+# hr-system-ms
+HR System with Microservices
+Microservices-based HR System built with Java & Spring Boot. Implements service discovery, API gateway, asynchronous processing (RabbitMQ), and independent persistence per microservice for a scalable HR back-end solution.
 
 # Arquitetura e Decisões Técnicas
 
