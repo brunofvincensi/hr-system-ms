@@ -1,17 +1,24 @@
 # hr-system-ms
-HR System with Microservices
-Microservices-based HR System built with Java & Spring Boot. Implements service discovery, API gateway, asynchronous processing (RabbitMQ), and independent persistence per microservice for a scalable HR back-end solution.
 
-# Arquitetura e Decisões Técnicas
+## HR System with Microservices
 
-## Forma da comunicação entre os microserviços
+Microservices-based HR System built with **Java & Spring Boot**.  
+Implements **service discovery**, **API Gateway**, **asynchronous processing (RabbitMQ)**, and **independent persistence per microservice**, aiming for a scalable and maintainable HR back-end solution.
 
-As chamadas externas chegam inicialmente ao API Gateway, que repassa a requisição para o microserviço correspondente, registrado no Eureka.
+---
 
-- **Comunicação síncrona (REST)**: utilizada quando um microserviço precisa de uma resposta imediata de outro.
-- **Comunicação assíncrona (RabbitMQ)**: utilizada para processamentos que podem ocorrer em segundo plano, enviando eventos para filas que serão consumidas posteriormente pelo mesmo microserviço ou por outro.
+## Architecture and Technical Decisions
 
-## Tecnologias escolhidas
+### Microservices Communication Strategy
+
+All external requests first reach the **API Gateway**, which forwards them to the appropriate microservice registered in **Eureka Service Registry**.
+
+- **Synchronous communication (REST)**: used when a microservice requires an immediate response from another service.
+- **Asynchronous communication (RabbitMQ)**: used for background or long-running processes, publishing events to queues that are later consumed by the same or other microservices.
+
+---
+
+## Chosen Technologies
 
 - **Java 17**
 - **Spring Boot 3.x**
@@ -19,71 +26,151 @@ As chamadas externas chegam inicialmente ao API Gateway, que repassa a requisiç
 - **RabbitMQ**
 - **Redis**
 
-## Estratégia para separação de bases de dados
+---
 
-A estratégia que adotei foi a de que cada microserviço possui sua própria base de dados, garantindo isolamento, independência e autonômica de evolução para cada domínio.
+## Database Separation Strategy
 
-## Pontos positivos e negativos e alternativas consideradas nos serviços
+Each microservice owns its **own database**, ensuring:
+- Data isolation  
+- Independent evolution  
+- Reduced coupling between domains  
+
+This approach improves resilience and aligns with microservices best practices.
+
+---
+
+## Service Analysis: Pros, Cons, and Alternatives
 
 ### Registry Service
 
-- Serviço que usa o Eureka que faz com que os serviços possam se encontrar sem precisarem saber do endereço fixo dos outros.
+- Uses **Eureka** to allow services to discover each other without relying on fixed network addresses.
+
+---
 
 ### Gateway Service
 
-- Serviço que centraliza as requisições de origem externa.
-- A validação das roles dos usuários foi feita nesse serviço, impedindo que as requisições fossem repassadas para os outros serviços caso a role não tenha autorização, fazendo com que centralize essas validações.
-- Implementado um cache com Redis das informações do usuário para não precisar consultar a role do usuário em toda requisição, além de passar algumas dessas informações do usuário no header da requisição.
-- Quando usuário é alterado é enviado um event pela api de usuário e consumida por este, para invalidar o cache do Redis
-- **Ponto negativo**: único ponto de entrada para todos os microserviços, se o Gateway falhar, todo o sistema fica inacessível. Talvez implementar várias instâncias desse serviço para contornar esse problema
-- **Sugestões de melhoria**: Implementar a autenticação com JWT ou Oauth2, hoje tem apenas a autorização (roles).
+- Central entry point for all external requests.
+- User **role validation** is handled at the gateway level, preventing unauthorized requests from reaching downstream services.
+- Implements **Redis caching** for user information to avoid repeated role validation calls.
+- Some user information is propagated through request headers.
+- When a user is updated, the **User Service publishes an event**, which is consumed by the Gateway to invalidate the Redis cache.
+
+**Negative point**:
+- Single point of entry — if the Gateway fails, the entire system becomes inaccessible.
+
+**Possible improvement**:
+- Deploy multiple Gateway instances for high availability.
+
+**Future improvements**:
+- Implement authentication using **JWT or OAuth2**.  
+  Currently, the system supports authorization (roles) only.
+
+---
 
 ### Employee Service
 
-- Implementado a requisição de cadastrar Escala de Trabalho separado para não ter que repetir a cada novo colaborador e duplicar varias informações na base.
-- Implementado a requisição de admissão de colaborador, na qual possue as informações do colaborador, informações para criação de usuário e o id que referência a Escala de Trabalho pré-cadastrada.
-- A criação de usuário é feita de forma síncrona (salva colaborador e chama User Service); se houver erro, a transação é abortada.
-- **Ponto negativo1**: pode haver inconsistência se ocorrer uma falha inesperada após criar o usuário, mas antes de salvar o colaborador.
-- **Alternativa1**: realizar a criação de usuário de forma assíncrona, com mecanismo de compensação (remoção de colaborador em caso de falha).
-- **Ponto negativo2**: os serviços filhos não irão controlar autenticação e autorização
-- **Alternativa2**: manter apenas a api gateway publica e os serviços em uma network privada para não acessa-los diretemente.
+- Work Schedule registration is handled separately to avoid duplicating data for each employee.
+- Employee onboarding endpoint includes:
+  - Employee data  
+  - User creation data  
+  - Reference to a pre-registered Work Schedule
+- User creation is done **synchronously**:
+  - The employee is saved
+  - The User Service is called
+  - If any error occurs, the transaction is rolled back
+
+**Negative point 1**:
+- Potential inconsistency if an unexpected failure occurs after user creation but before employee persistence.
+
+**Alternative 1**:
+- Make user creation asynchronous with a compensation mechanism (rollback employee creation on failure).
+
+**Negative point 2**:
+- Downstream services do not handle authentication and authorization.
+
+**Alternative 2**:
+- Keep only the API Gateway publicly accessible and place all other services inside a private network.
+
+---
 
 ### Time Entry Service
 
-- Cadastro de ponto por data/hora atual para colaboradores.
-- Funcionalidades de edição e consulta.
-- Criado índice composto por colaborador e data, devido ao alto volume esperado e ao uso frequente desses campos em filtros.
-- **Ponto positivo**: otimização de consultas em tabelas grandes desde o início do projeto.
-- **Sugestões futuras**: Se a tabela se tornar extremamente grande, pode ser criada uma tabela auxiliar com menos dados, talvez salvando apenas o colaborador e mês e sendo uma fk para a tabela principal, para facilitar filtros iniciais, ajudando na hora de processar as folhas de pagamento
+- Allows employees to register time entries using the current date and time.
+- Supports editing and querying time entries.
+- Uses a **composite index (employee + date)** due to:
+  - High expected data volume
+  - Frequent filtering by these fields
+
+**Positive point**:
+- Query optimization for large tables from the beginning of the project.
+
+**Future suggestions**:
+- If the table grows excessively, create an auxiliary table with reduced data
+  (e.g., employee + month), referencing the main table to optimize payroll processing.
+
+---
 
 ### User Service
 
-- Requisição de criação de usuário chamada pelo Employee Service.
-- Armazena apenas informações relacionadas ao usuário (role, senha).
-- Ao atualizar um usuário, publica um evento na fila para permitir invalidação de cache em serviços que armazenam dados de usuário.
-- **Ponto positivo**: mantém responsabilidade única e integra com mensageria para consistência de cache.
+- User creation endpoint invoked by the Employee Service.
+- Stores only user-related data (role, password).
+- Publishes an event whenever a user is updated, allowing other services to invalidate cached user data.
+
+**Positive point**:
+- Maintains single responsibility and integrates with messaging for cache consistency.
+
+---
 
 ### Payroll Service
 
-- Inicia cálculo de folha de pagamento de forma assíncrona, publicando evento no RabbitMQ.
-- Como é assincrona, a requisição retorna imediatamente, apenas com a entidade de movimentação do processamento da folha salva, retornando o id dela para posterior consulta com o status code 202, pois ainda não está concluído
-- O próprio serviço consome a fila e processa a folha.
-- Faz requisições para a api de colaborador e marcação para ter os dados de "base de cálculo".
-- Armazena histórico de execuções com status, usuário solicitante, data de início e fim, para auditoria e consulta.
-- Ao finalizar, publica evento para envio de e-mail.
-- **Ponto positivo**: evita bloqueio do cliente e garante rastreabilidade do processo.
-- **Ponto negativo**: depende de processamento assíncrono, exigindo mecanismos de monitoramento de filas.
-- **Sugestões futuras**: Segregar essa tabela, criando uma tabela mais genérica com o intuito apenas de salvar o histórico movimentação do envio do processamento, e uma só para armazenar a folha de pagamento de fato.
+- Payroll calculation is started **asynchronously** by publishing an event to RabbitMQ.
+- Since processing is asynchronous:
+  - The request returns immediately
+  - A payroll processing entity is created and returned with **HTTP 202 (Accepted)**
+  - The entity ID can be used later to check the processing status
+- The service consumes its own queue to process payroll.
+- Retrieves data from Employee and Time Entry services as calculation inputs.
+- Stores execution history including:
+  - Status
+  - Requesting user
+  - Start and end timestamps
+- Publishes an event upon completion to trigger email notifications.
 
-### E-mail Service
+**Positive point**:
+- Avoids client blocking and provides full process traceability.
 
-- Consome eventos de solicitação de envio de e-mails.
-- Responsável por efetuar a entrega das notificações.
-- **Ponto positivo**: desacopla a responsabilidade de envio, permitindo que outros serviços apenas disparem eventos.
+**Negative point**:
+- Relies on asynchronous processing, requiring queue monitoring and observability.
 
-### Common
+**Future suggestions**:
+- Split persistence into:
+  - A generic table for processing history
+  - A dedicated table for actual payroll results
 
-- Biblioteca comum, compartilhada entre os serviços
-- Compartilha dados das roles, constates das informações que vão no header e exceções personalizadas e controller handler padrão das exception
+---
 
-### Project Diagram Link: https://lucid.app/lucidchart/4f39c075-11e3-4779-96b1-34c879567a57/edit?viewport_loc=-1553%2C429%2C4315%2C2129%2C0_0&invitationId=inv_ec149fa5-b2d8-448e-8f10-0de1caea458b
+### Email Service
+
+- Consumes email request events from RabbitMQ.
+- Responsible solely for sending notifications.
+
+**Positive point**:
+- Decouples email delivery from business services, improving scalability and responsibility separation.
+
+---
+
+### Common Module
+
+- Shared library used across microservices.
+- Contains:
+  - Role definitions
+  - Request header constants
+  - Custom exceptions
+  - Global exception handler (Controller Advice)
+
+---
+
+## Project Diagram
+
+Architecture diagram available at:  
+https://lucid.app/lucidchart/4f39c075-11e3-4779-96b1-34c879567a57/edit
