@@ -172,5 +172,7 @@ This approach improves resilience and aligns with microservices best practices.
 
 ## Project Diagram
 
+<img width="3600" height="1960" alt="Fluxograma Projeto Entra21 - Página 1" src="https://github.com/user-attachments/assets/e2f52fb7-14ce-491b-bd8e-32d44818741f" />
+
 Architecture diagram available at:  
 https://lucid.app/lucidchart/4f39c075-11e3-4779-96b1-34c879567a57/edit
